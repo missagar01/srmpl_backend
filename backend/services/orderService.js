@@ -1,4 +1,4 @@
-const { oracledb, dbConfig } = require('../config/db');
+const { oracledb, getConnection } = require('../config/db');
 
 const HEAD_COLUMN_MAP = new Map([
   ['entityCode', 'ENTITY_CODE'],
@@ -640,7 +640,9 @@ const mapExternalPayload = (order) => {
     gstNo,
     userCode: cleanValue(firstIndent.user_name) || 'SR002',
     tranType: 'PD',
-    purchaserName: purchaserName || undefined
+    purchaserName: purchaserName || undefined,
+    partyRefNo: getValue(order, 'partyRefNo', 'party_ref_no', 'partyrefno') || undefined,
+    partyRefDate: getValue(order, 'partyRefDate', 'party_ref_date', 'partyrefdate') || undefined
   };
 
   let defaultDiv = 'CO';
@@ -695,7 +697,7 @@ const lookupUserCodeByName = async (connection, userName) => {
 const createOrder = async ({ header, items }) => {
   let connection;
   try {
-    connection = await oracledb.getConnection(dbConfig);
+    connection = await getConnection();
 
     // Resolve ENTITY_CODE early
     const headerObject = pairArrayToObject(header);
@@ -709,6 +711,8 @@ const createOrder = async ({ header, items }) => {
         console.log(`[orderService] Resolved user code: ${lookedUpUserCode} for purchaser: ${purchaserName}`);
         headerObject.CREATEDBY = lookedUpUserCode;
         headerObject.createdBy = lookedUpUserCode;
+        headerObject.USER_CODE = lookedUpUserCode;
+        headerObject.userCode = lookedUpUserCode;
       } else {
         console.log(`[orderService] User code not found in USER_MAST for purchaser: ${purchaserName}`);
       }
@@ -870,7 +874,7 @@ const createOrder = async ({ header, items }) => {
         }
 
         if (dbIndent.USER_CODE) {
-          if (isValBlank(normalizedHeader.USER_CODE) || normalizedHeader.USER_CODE === 'SR002') {
+          if (!lookedUpUserCode && (isValBlank(normalizedHeader.USER_CODE) || normalizedHeader.USER_CODE === 'SR002')) {
             normalizedHeader.USER_CODE = dbIndent.USER_CODE;
           }
           if (!lookedUpUserCode && (isValBlank(normalizedHeader.CREATEDBY) || normalizedHeader.CREATEDBY === 'SR002')) {
