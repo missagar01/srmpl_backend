@@ -26,8 +26,8 @@ const insertOrder = async (req, res, next) => {
       return res.status(400).json({ error: 'Required fields missing (header, items[] or body[]).' });
     }
 
-    const result = await orderService.createOrder({ header, items });
-    res.status(201).json(result);
+    await orderService.createOrder({ header, items });
+    res.status(200).json({ status: true, message: 'Order created successfully.' });
   } catch (err) {
     if (err.type === 'ACCOUNT_NOT_FOUND' || err.type === 'VALIDATION_ERROR') {
       return res.status(err.statusCode).json({ error: err.type, details: err.message });

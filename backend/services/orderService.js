@@ -40,7 +40,8 @@ const HEAD_COLUMN_MAP = new Map([
   ['consigneeAddressSlno', 'CONSIGNEE_ADDRESS_SLNO'],
   ['createdDate', 'CREATEDDATE'],
   ['userCode', 'USER_CODE'],
-  ['createdBy', 'CREATEDBY']
+  ['createdBy', 'CREATEDBY'],
+  ['partyAckRefNo', 'PARTY_ACK_REFNO']
 ]);
 
 const HEAD_INSERT_COLUMNS = new Set([
@@ -140,7 +141,8 @@ const HEAD_INSERT_COLUMNS = new Set([
   'CONSIGNEE_ADDRESS_SLNO',
   'CREATEDDATE',
   'CREATEDBY',
-  'USER_CODE'
+  'USER_CODE',
+  'PARTY_ACK_REFNO'
 ]);
 
 const DATE_COLUMNS = new Set([
@@ -393,6 +395,7 @@ const normalizeHeader = (header, entityCode = 'SR') => {
   Reflect.set(normalized, 'AMENDDATE', Reflect.get(normalized, 'AMENDDATE') || Reflect.get(normalized, 'VRDATE'));
   Reflect.set(normalized, 'CURRENCY_CODE', Reflect.get(normalized, 'CURRENCY_CODE') || 'INR');
   Reflect.set(normalized, 'EXCHANGE_RATE', Reflect.get(normalized, 'EXCHANGE_RATE') ?? 1);
+  Reflect.set(normalized, 'ADDON_CODE', 'PGST8');
 
   const userCode = getValue(headerObject, 'USER_CODE', 'userCode') || 'SR002';
   Reflect.set(normalized, 'USER_CODE', Reflect.get(normalized, 'USER_CODE') || userCode);
@@ -451,7 +454,7 @@ const normalizeBodyItem = (item, index, header, gstNo) => {
   }
 
   Reflect.set(normalized, 'ENTITY_CODE', header.ENTITY_CODE);
-  Reflect.set(normalized, 'TCODE', header.TCODE);
+  Reflect.set(normalized, 'TCODE', header.TCODE || 'U');
   Reflect.set(normalized, 'VRNO', header.VRNO);
   Reflect.set(normalized, 'AMENDNO', header.AMENDNO);
   Reflect.set(normalized, 'AMENDDATE', Reflect.get(normalized, 'AMENDDATE') || header.AMENDDATE || header.VRDATE);
@@ -463,7 +466,7 @@ const normalizeBodyItem = (item, index, header, gstNo) => {
   } else if (header.ENTITY_CODE === 'PA') {
     defaultDiv = 'C1';
   }
-  Reflect.set(normalized, 'DIV_CODE', Reflect.get(normalized, 'DIV_CODE') || defaultDiv);
+  Reflect.set(normalized, 'DIV_CODE', defaultDiv);
   const userUom = getValue(itemObject, 'um', 'uom', 'aum', 'rateUm', 'UM', 'AUM', 'RATE_UM') || 'NOS';
   Reflect.set(normalized, 'UM', userUom);
   Reflect.set(normalized, 'AUM', userUom);
@@ -616,8 +619,12 @@ const mapExternalPayload = (order) => {
   const variants = Array.isArray(order.order_variants) ? order.order_variants : [];
   const firstIndent = variants.at(0)?.indent_product || {};
   const gstNo = cleanValue(order.vendor?.gstin);
-  const entityCode = cleanValue(firstIndent.entity_code) || 'SR';
-  const purchaserName = getValue(order, 'purchaserName', 'purchaser_name', 'purchaser');
+  const entityCode = cleanValue(firstIndent.entity_code) || undefined;
+
+  let purchaserName = getValue(order, 'purchaserName', 'purchaser_name', 'purchaser');
+  if (!purchaserName && order.order_confirmed_by && typeof order.order_confirmed_by === 'object') {
+    purchaserName = cleanValue(order.order_confirmed_by.name || order.order_confirmed_by.username);
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   const vrDate = today;
@@ -628,21 +635,21 @@ const mapExternalPayload = (order) => {
   const dueDate = dueDateObj.toISOString().slice(0, 10);
 
   const rawPo = order.po_number || '';
-  const vrNo = rawPo.replace(/^O-/, '').replace(/[^\w/-]/g, '');
 
   const header = {
     entityCode,
-    tCode: 'F',
-    vrNo,
+    tCode: 'U',
+    vrNo: undefined, // Always auto-generate from sequence
     vrDate,
     amendNo: 0,
     amendDate: vrDate,
     gstNo,
-    userCode: cleanValue(firstIndent.user_name) || 'SR002',
+    userCode: cleanValue(firstIndent.user_code) || cleanValue(firstIndent.user_name) || 'SR002',
     tranType: 'PD',
     purchaserName: purchaserName || undefined,
-    partyRefNo: getValue(order, 'partyRefNo', 'party_ref_no', 'partyrefno') || undefined,
-    partyRefDate: getValue(order, 'partyRefDate', 'party_ref_date', 'partyrefdate') || undefined
+    partyRefNo: getValue(order, 'partyRefNo', 'party_ref_no', 'partyrefno', 'rfq_id', 'rfqId') || undefined,
+    partyRefDate: getValue(order, 'partyRefDate', 'party_ref_date', 'partyrefdate', 'rfq_date', 'rfqDate') || undefined,
+    partyAckRefNo: rawPo.trim() || undefined
   };
 
   let defaultDiv = 'CO';
@@ -654,18 +661,19 @@ const mapExternalPayload = (order) => {
 
   const items = variants.map((variant, index) => {
     const indent = variant.indent_product || {};
+    const slNoVal = toNumber(cleanValue(indent.slno) || cleanValue(indent.product_srno) || index + 1);
     return {
-      slNo: cleanValue(indent.slno) || index + 1,
+      slNo: slNoVal,
       divCode: cleanValue(indent.division_code) || defaultDiv,
       itemCode: cleanValue(indent.product_id),
-      um: cleanValue(indent.uom) || 'NOS',
+      um: cleanValue(indent.uom) || undefined,
       qtyOrder: toNumber(variant.order_quantity || indent.quantity, 0),
-      aum: cleanValue(indent.uom) || 'NOS',
+      aum: cleanValue(indent.uom) || undefined,
       rate: toNumber(variant.order_price, 0),
-      gst: toNumber(variant.gst || variant.gst_rate || variant.tax_rate || variant.taxRate || variant.gstRate || indent.gst_rate || indent.gst, 0),
+      gst: toNumber(variant.gst || variant.product_gst || variant.gst_rate || variant.tax_rate || variant.taxRate || variant.gstRate || indent.gst_rate || indent.gst, 0),
       indentTCode: 'I',
       indentVrNo: cleanValue(indent.indent_number),
-      indentSlNo: cleanValue(indent.slno) || index + 1,
+      indentSlNo: slNoVal,
       dueDate: dueDate,
       stockType: 'R',
       orderTolerance: toNumber(variant.order_tolerance || variant.orderTolerance, 0)
