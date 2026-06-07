@@ -422,6 +422,10 @@ const normalizeHeader = (header, entityCode = 'SR') => {
   Reflect.set(normalized, 'FREIGHT_BASIS', Reflect.get(normalized, 'FREIGHT_BASIS') || 'NA');
   Reflect.set(normalized, 'VEHICLE_TYPE', Reflect.get(normalized, 'VEHICLE_TYPE') || 'U');
 
+  // Hardcoded values
+  Reflect.set(normalized, 'PAYMENT_MODE', 'OC');
+  Reflect.set(normalized, 'BILL_PASS_TYPE', 'AQ');
+
   // Defaults for IRFIELDs
   Reflect.set(normalized, 'IRFIELD4', Reflect.get(normalized, 'IRFIELD4') || '100% Payment will be paid within 15 days from the date of supply of mateRIAL');
   Reflect.set(normalized, 'IRFIELD5', Reflect.get(normalized, 'IRFIELD5') || 'If not paid in time please remind to our mail id: purchase@sagartmt.com');
@@ -546,12 +550,20 @@ const normalizeBodyItem = (item, index, header, gstNo) => {
   Reflect.set(normalized, 'VRDATE', Reflect.get(normalized, 'VRDATE') || header.VRDATE);
   Reflect.set(normalized, 'SLNO', Reflect.get(normalized, 'SLNO') || index + 1);
   let defaultDiv = 'CO';
+  let defaultDept = 'SRMPL';
+  let defaultCost = 'SRMPL';
   if (header.ENTITY_CODE === 'AL') {
     defaultDiv = 'C2';
+    defaultDept = 'ALNKR';
+    defaultCost = 'ALNKR';
   } else if (header.ENTITY_CODE === 'PA') {
     defaultDiv = 'C1';
+    defaultDept = 'PANKJ';
+    defaultCost = 'PANKJ';
   }
-  Reflect.set(normalized, 'DIV_CODE', defaultDiv);
+  Reflect.set(normalized, 'DIV_CODE', Reflect.get(normalized, 'DIV_CODE') || defaultDiv);
+  Reflect.set(normalized, 'DEPT_CODE', Reflect.get(normalized, 'DEPT_CODE') || defaultDept);
+  Reflect.set(normalized, 'COST_CODE', Reflect.get(normalized, 'COST_CODE') || defaultCost);
   const userUom = getValue(itemObject, 'um', 'uom', 'aum', 'rateUm', 'UM', 'AUM', 'RATE_UM') || 'NOS';
   Reflect.set(normalized, 'UM', userUom);
   Reflect.set(normalized, 'AUM', userUom);
@@ -753,7 +765,9 @@ const mapExternalPayload = (order) => {
     const slNoVal = toNumber(cleanValue(indent.slno) || cleanValue(indent.product_srno) || index + 1);
     return {
       slNo: slNoVal,
-      divCode: cleanValue(indent.division_code) || defaultDiv,
+      divCode: cleanValue(variant.div_code) || cleanValue(variant.divCode) || cleanValue(indent.division_code) || defaultDiv,
+      deptCode: cleanValue(variant.dept_code) || cleanValue(variant.deptCode) || cleanValue(indent.dept_code) || cleanValue(indent.deptCode) || undefined,
+      costCode: cleanValue(variant.cost_code) || cleanValue(variant.costCode) || cleanValue(indent.cost_code) || cleanValue(indent.costCode) || undefined,
       itemCode: cleanValue(indent.product_id),
       um: cleanValue(indent.uom) || undefined,
       qtyOrder: toNumber(variant.order_quantity || indent.quantity, 0),
