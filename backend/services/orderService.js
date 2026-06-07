@@ -34,14 +34,24 @@ const HEAD_COLUMN_MAP = new Map([
   ['currencyCode', 'CURRENCY_CODE'],
   ['exchangeRate', 'EXCHANGE_RATE'],
   ['approvedBy', 'APPROVEDBY'],
-  ['approvedDate', 'APPROVEDDATE'],
   ['lastUpdate', 'LASTUPDATE'],
-  ['appRemark', 'APP_REMARK'],
   ['consigneeAddressSlno', 'CONSIGNEE_ADDRESS_SLNO'],
   ['createdDate', 'CREATEDDATE'],
   ['userCode', 'USER_CODE'],
   ['createdBy', 'CREATEDBY'],
-  ['partyAckRefNo', 'PARTY_ACK_REFNO']
+  ['partyAckRefNo', 'PARTY_ACK_REFNO'],
+  ['orderPriceBasis', 'IRFIELD1'],
+  ['order_price_basis', 'IRFIELD1'],
+  ['orderPaymentTerm', 'PAYMENT_DUEDAYS'],
+  ['order_payment_term', 'PAYMENT_DUEDAYS'],
+  ['orderDeliveryPeriod', 'IRFIELD3'],
+  ['order_delivery_period', 'IRFIELD3'],
+  ['contactPerson', 'CONTACT_PERSON'],
+  ['contact_person', 'CONTACT_PERSON'],
+  ['contactDetail', 'CONTACT_DETAIL'],
+  ['contact_detail', 'CONTACT_DETAIL'],
+  ['contactEmail', 'CONTACT_EMAIL'],
+  ['contact_email', 'CONTACT_EMAIL']
 ]);
 
 const HEAD_INSERT_COLUMNS = new Set([
@@ -127,7 +137,6 @@ const HEAD_INSERT_COLUMNS = new Set([
   'AFRATEI17',
   'AFRATEI18',
   'APPROVEDBY',
-  'APPROVEDDATE',
   'LASTUPDATE',
   'AFLOGIC2',
   'AFLOGIC3',
@@ -137,12 +146,14 @@ const HEAD_INSERT_COLUMNS = new Set([
   'AFLOGIC9',
   'AFLOGIC10',
   'AFLOGIC16',
-  'APP_REMARK',
   'CONSIGNEE_ADDRESS_SLNO',
   'CREATEDDATE',
   'CREATEDBY',
   'USER_CODE',
-  'PARTY_ACK_REFNO'
+  'PARTY_ACK_REFNO',
+  'CONTACT_PERSON',
+  'CONTACT_DETAIL',
+  'CONTACT_EMAIL'
 ]);
 
 const DATE_COLUMNS = new Set([
@@ -150,7 +161,6 @@ const DATE_COLUMNS = new Set([
   'AMENDDATE',
   'VALIDUPTO_DATE',
   'PARTYREFDATE',
-  'APPROVEDDATE',
   'LASTUPDATE',
   'CREATEDDATE'
 ]);
@@ -276,7 +286,7 @@ const BODY_NUMBER_COLUMNS = new Set([
   'ARATE',
   'FC_RATE',
   'AUMTOUM',
-  'IRATE',
+  'IRATEI',
   'TAX_RATE',
   'TAX_AMOUNT',
   'TAX_ONAMOUNT',
@@ -330,6 +340,13 @@ const getValue = (source, ...keys) => {
 const excelSerialToDate = (serial) => {
   const utcMs = (Number(serial) - 25569) * 86400 * 1000;
   return new Date(utcMs);
+};
+
+const extractInt = (value) => {
+  if (isBlank(value)) return 0;
+  if (typeof value === 'number') return Math.floor(value);
+  const match = String(value).match(/\d+/);
+  return match ? parseInt(match[0], 10) : 0;
 };
 
 const toDbDate = (value) => {
@@ -396,6 +413,74 @@ const normalizeHeader = (header, entityCode = 'SR') => {
   Reflect.set(normalized, 'CURRENCY_CODE', Reflect.get(normalized, 'CURRENCY_CODE') || 'INR');
   Reflect.set(normalized, 'EXCHANGE_RATE', Reflect.get(normalized, 'EXCHANGE_RATE') ?? 1);
   Reflect.set(normalized, 'ADDON_CODE', 'PGST8');
+
+  // Extract PAYMENT_DUEDAYS as integer from payload terms
+  const rawPaymentDays = Reflect.get(normalized, 'PAYMENT_DUEDAYS') || getValue(headerObject, 'paymentDueDays', 'payment_due_days', 'orderPaymentTerm', 'order_payment_term');
+  Reflect.set(normalized, 'PAYMENT_DUEDAYS', extractInt(rawPaymentDays));
+
+  // Defaults for Freight Basis and Vehicle Type
+  Reflect.set(normalized, 'FREIGHT_BASIS', Reflect.get(normalized, 'FREIGHT_BASIS') || 'NA');
+  Reflect.set(normalized, 'VEHICLE_TYPE', Reflect.get(normalized, 'VEHICLE_TYPE') || 'U');
+
+  // Defaults for IRFIELDs
+  Reflect.set(normalized, 'IRFIELD4', Reflect.get(normalized, 'IRFIELD4') || '100% Payment will be paid within 15 days from the date of supply of mateRIAL');
+  Reflect.set(normalized, 'IRFIELD5', Reflect.get(normalized, 'IRFIELD5') || 'If not paid in time please remind to our mail id: purchase@sagartmt.com');
+  Reflect.set(normalized, 'IRFIELD6', Reflect.get(normalized, 'IRFIELD6') || 'Please send 1 copy of Test Certificate with supplied material to Transport , else he will not accept the material');
+  Reflect.set(normalized, 'IRFIELD14', Reflect.get(normalized, 'IRFIELD14') || 'If any item found defective or does not match with the specs, will be replaced free of charge at our plan');
+  Reflect.set(normalized, 'IRFIELD19', Reflect.get(normalized, 'IRFIELD19') || 'Please handover with proper packing, to avoid any transit damage, to our Representative, with 1 copy of this PO & your invoice');
+
+  // AFCODE defaults
+  Reflect.set(normalized, 'AFCODE2', Reflect.get(normalized, 'AFCODE2') || 'DI');
+  Reflect.set(normalized, 'AFCODE3', Reflect.get(normalized, 'AFCODE3') || 'IN');
+  Reflect.set(normalized, 'AFCODE4', Reflect.get(normalized, 'AFCODE4') || 'FRB');
+  Reflect.set(normalized, 'AFCODE5', Reflect.get(normalized, 'AFCODE5') || 'PA');
+  Reflect.set(normalized, 'AFCODE6', Reflect.get(normalized, 'AFCODE6') || 'O1');
+  Reflect.set(normalized, 'AFCODE7', Reflect.get(normalized, 'AFCODE7') || 'DM');
+  Reflect.set(normalized, 'AFCODE8', Reflect.get(normalized, 'AFCODE8') || 'SGST');
+  Reflect.set(normalized, 'AFCODE9', Reflect.get(normalized, 'AFCODE9') || 'CGST');
+  Reflect.set(normalized, 'AFCODE10', Reflect.get(normalized, 'AFCODE10') || 'IGST');
+  Reflect.set(normalized, 'AFCODE11', Reflect.get(normalized, 'AFCODE11') || 'CESS');
+  Reflect.set(normalized, 'AFCODE12', Reflect.get(normalized, 'AFCODE12') || 'FR');
+  Reflect.set(normalized, 'AFCODE13', Reflect.get(normalized, 'AFCODE13') || 'O4');
+  Reflect.set(normalized, 'AFCODE14', Reflect.get(normalized, 'AFCODE14') || 'DQ');
+  Reflect.set(normalized, 'AFCODE15', Reflect.get(normalized, 'AFCODE15') || 'DO');
+  Reflect.set(normalized, 'AFCODE16', Reflect.get(normalized, 'AFCODE16') || 'TC');
+  Reflect.set(normalized, 'AFCODE17', Reflect.get(normalized, 'AFCODE17') || 'O3');
+  Reflect.set(normalized, 'AFCODE18', Reflect.get(normalized, 'AFCODE18') || 'RO');
+
+  // AFRATE defaults
+  Reflect.set(normalized, 'AFRATE2', Reflect.get(normalized, 'AFRATE2') ?? 0);
+  Reflect.set(normalized, 'AFRATE8', Reflect.get(normalized, 'AFRATE8') ?? 0);
+  Reflect.set(normalized, 'AFRATE9', Reflect.get(normalized, 'AFRATE9') ?? 0);
+
+  // AFRATEI defaults
+  Reflect.set(normalized, 'AFRATEI2', Reflect.get(normalized, 'AFRATEI2') || 'L');
+  Reflect.set(normalized, 'AFRATEI3', Reflect.get(normalized, 'AFRATEI3') || 'P');
+  Reflect.set(normalized, 'AFRATEI4', Reflect.get(normalized, 'AFRATEI4') || 'R');
+  Reflect.set(normalized, 'AFRATEI5', Reflect.get(normalized, 'AFRATEI5') || 'P');
+  Reflect.set(normalized, 'AFRATEI6', Reflect.get(normalized, 'AFRATEI6') || 'L');
+  Reflect.set(normalized, 'AFRATEI7', Reflect.get(normalized, 'AFRATEI7') || 'L');
+  Reflect.set(normalized, 'AFRATEI8', Reflect.get(normalized, 'AFRATEI8') || 'P');
+  Reflect.set(normalized, 'AFRATEI9', Reflect.get(normalized, 'AFRATEI9') || 'P');
+  Reflect.set(normalized, 'AFRATEI10', Reflect.get(normalized, 'AFRATEI10') || 'P');
+  Reflect.set(normalized, 'AFRATEI11', Reflect.get(normalized, 'AFRATEI11') || 'R');
+  Reflect.set(normalized, 'AFRATEI12', Reflect.get(normalized, 'AFRATEI12') || 'L');
+  Reflect.set(normalized, 'AFRATEI13', Reflect.get(normalized, 'AFRATEI13') || 'M');
+  Reflect.set(normalized, 'AFRATEI14', Reflect.get(normalized, 'AFRATEI14') || 'L');
+  Reflect.set(normalized, 'AFRATEI15', Reflect.get(normalized, 'AFRATEI15') || 'L');
+  Reflect.set(normalized, 'AFRATEI16', Reflect.get(normalized, 'AFRATEI16') || 'Q');
+  Reflect.set(normalized, 'AFRATEI17', Reflect.get(normalized, 'AFRATEI17') || 'L');
+  Reflect.set(normalized, 'AFRATEI18', Reflect.get(normalized, 'AFRATEI18') || 'A');
+
+  // AFLOGIC defaults
+  Reflect.set(normalized, 'AFLOGIC2', Reflect.get(normalized, 'AFLOGIC2') ?? 1);
+  Reflect.set(normalized, 'AFLOGIC3', Reflect.get(normalized, 'AFLOGIC3') ?? 1254);
+  Reflect.set(normalized, 'AFLOGIC4', Reflect.get(normalized, 'AFLOGIC4') ?? 1);
+  Reflect.set(normalized, 'AFLOGIC5', Reflect.get(normalized, 'AFLOGIC5') ?? 12);
+  Reflect.set(normalized, 'AFLOGIC8', Reflect.get(normalized, 'AFLOGIC8') ?? 1234567);
+  Reflect.set(normalized, 'AFLOGIC9', Reflect.get(normalized, 'AFLOGIC9') ?? 1234567);
+  Reflect.set(normalized, 'AFLOGIC10', Reflect.get(normalized, 'AFLOGIC10') ?? 1234567);
+  Reflect.set(normalized, 'AFLOGIC16', Reflect.get(normalized, 'AFLOGIC16') || '123456789ABCDEF');
 
   const userCode = getValue(headerObject, 'USER_CODE', 'userCode') || 'SR002';
   Reflect.set(normalized, 'USER_CODE', Reflect.get(normalized, 'USER_CODE') || userCode);
@@ -629,7 +714,7 @@ const mapExternalPayload = (order) => {
   const today = new Date().toISOString().slice(0, 10);
   const vrDate = today;
 
-  const deliveryDays = Number(order.order_delivery_period || 0);
+  const deliveryDays = extractInt(order.order_delivery_period);
   const dueDateObj = new Date();
   dueDateObj.setDate(dueDateObj.getDate() + deliveryDays);
   const dueDate = dueDateObj.toISOString().slice(0, 10);
@@ -649,7 +734,11 @@ const mapExternalPayload = (order) => {
     purchaserName: purchaserName || undefined,
     partyRefNo: getValue(order, 'partyRefNo', 'party_ref_no', 'partyrefno', 'rfq_id', 'rfqId') || undefined,
     partyRefDate: getValue(order, 'partyRefDate', 'party_ref_date', 'partyrefdate', 'rfq_date', 'rfqDate') || undefined,
-    partyAckRefNo: rawPo.trim() || undefined
+    partyAckRefNo: rawPo.trim() || undefined,
+    orderPriceBasis: cleanValue(order.order_price_basis) || undefined,
+    orderPaymentTerm: cleanValue(order.order_payment_term) || undefined,
+    orderDeliveryPeriod: cleanValue(order.order_delivery_period) || undefined,
+    freightBasis: getValue(order, 'freightBasis', 'freight_basis') || undefined
   };
 
   let defaultDiv = 'CO';
@@ -676,7 +765,9 @@ const mapExternalPayload = (order) => {
       indentSlNo: slNoVal,
       dueDate: dueDate,
       stockType: 'R',
-      orderTolerance: toNumber(variant.order_tolerance || variant.orderTolerance, 0)
+      orderTolerance: toNumber(variant.order_tolerance || variant.orderTolerance, 0),
+      irate: toNumber(variant.order_discount || variant.orderDiscount, 0) > 0 ? 'P' : undefined,
+      iratei: toNumber(variant.order_discount || variant.orderDiscount, 0) > 0 ? toNumber(variant.order_discount || variant.orderDiscount, 0) : undefined
     };
   });
 
@@ -827,13 +918,44 @@ const createOrder = async ({ header, items }) => {
 
     normalizedHeader.DELIVERY_FROM_SLNO = deliveryFromSlno;
 
+    // Fetch contact details if ACC_CODE is present
+    if (normalizedHeader.ACC_CODE) {
+      console.log(`Looking up contact details for ACC_CODE: ${normalizedHeader.ACC_CODE}`);
+      try {
+        const contactResult = await connection.execute(
+          'SELECT t.contact_person, t.mobile, t.email FROM acc_contact_mast t WHERE t.acc_code = :acc_code AND ROWNUM = 1',
+          { acc_code: normalizedHeader.ACC_CODE },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (contactResult.rows && contactResult.rows.length > 0) {
+          const firstRow = contactResult.rows[0];
+          normalizedHeader.CONTACT_PERSON = firstRow.CONTACT_PERSON || firstRow.contact_person || null;
+          normalizedHeader.CONTACT_DETAIL = firstRow.MOBILE || firstRow.mobile || null;
+          normalizedHeader.CONTACT_EMAIL = firstRow.EMAIL || firstRow.email || null;
+          console.log(`Resolved contact details for ACC_CODE ${normalizedHeader.ACC_CODE}:`, firstRow);
+        } else {
+          normalizedHeader.CONTACT_PERSON = null;
+          normalizedHeader.CONTACT_DETAIL = null;
+          normalizedHeader.CONTACT_EMAIL = null;
+        }
+      } catch (err) {
+        console.error(`Error querying contact details for ACC_CODE ${normalizedHeader.ACC_CODE}:`, err.message);
+        normalizedHeader.CONTACT_PERSON = null;
+        normalizedHeader.CONTACT_DETAIL = null;
+        normalizedHeader.CONTACT_EMAIL = null;
+      }
+    } else {
+      normalizedHeader.CONTACT_PERSON = null;
+      normalizedHeader.CONTACT_DETAIL = null;
+      normalizedHeader.CONTACT_EMAIL = null;
+    }
+
     // Set current date/timestamp values for ORDER_HEAD
     const now = new Date();
     const currentDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     normalizedHeader.VRDATE = currentDate;
     normalizedHeader.AMENDDATE = currentDate;
-    normalizedHeader.APPROVEDDATE = now;
     normalizedHeader.CREATEDDATE = now;
     normalizedHeader.LASTUPDATE = now;
 
@@ -909,6 +1031,16 @@ const createOrder = async ({ header, items }) => {
 
       bodyItems.push(normalizedItem);
     }
+
+    // Calculate sum of VALRECD and CRAMT from body items and assign to header
+    let totalValRecd = 0;
+    let totalCrAmt = 0;
+    for (const item of bodyItems) {
+      totalValRecd += (item.VALRECD || 0);
+      totalCrAmt += (item.CRAMT || 0);
+    }
+    normalizedHeader.VALRECD = totalValRecd;
+    normalizedHeader.CRAMT = totalCrAmt;
 
     validateOrder(normalizedHeader, bodyItems);
 
