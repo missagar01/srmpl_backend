@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Procurement & Store Chatbot</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- CSS Link -->
+  <link rel="stylesheet" href="app.css">
+  <!-- JS Link -->
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="glass-bg"></div>
+  <div class="container">
+    <header class="app-header">
+      <div class="header-logo">🤖</div>
+      <div class="header-titles">
+        <h1>Procurement & Store Assistant</h1>
+        <p>Real-time Inventory Check & Auto-Indent System</p>
+      </div>
+    </header>
+
+    <main class="chat-wrapper">
+      <div class="chat-container">
+        <!-- Chat Header -->
+        <div class="chat-header">
+          <div class="bot-avatar">
+            <span class="status-indicator online"></span>
+            🤖
+          </div>
+          <div class="bot-info">
+            <h3>StoreBot</h3>
+            <span class="bot-status">Connected to Oracle DB</span>
+          </div>
+        </div>
+
+        <!-- Chat Log -->
+        <div class="chat-messages" id="chatMessages">
+          <!-- Initial Welcome Message will be dynamically inserted here -->
+        </div>
+
+        <!-- Autocomplete Suggestions Panel -->
+        <div class="suggestions-panel" id="suggestionsPanel" style="display: none;">
+          <!-- Suggested items will go here -->
+        </div>
+
+        <!-- Chat Input Footer -->
+        <div class="chat-footer">
+          <form class="input-form" id="inputForm">
+            <input 
+              type="text" 
+              id="userInput" 
+              placeholder="Search item code or name (e.g., BOLT)..." 
+              autocomplete="off"
+            >
+            <button type="submit" class="send-btn" id="sendBtn">
+              <svg viewBox="0 0 24 24" class="send-icon">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
