@@ -847,12 +847,9 @@ const mapExternalPayload = (order) => {
     freightBasis: getValue(order, 'freightBasis', 'freight_basis') || undefined
   };
 
-  let defaultDiv = 'CO';
-  if (entityCode === 'AL') {
-    defaultDiv = 'C2';
-  } else if (entityCode === 'PA') {
-    defaultDiv = 'C1';
-  }
+  // NOTE: defaultDiv is intentionally NOT used here anymore.
+  // divCode is left undefined when not in payload so that createOrder's
+  // DB lookup (getIndentDetails) can fill in the correct DIV_CODE from INDENT_BODY.
 
   const items = variants.map((variant, index) => {
     const indent = variant.indent_product || {};
@@ -860,7 +857,7 @@ const mapExternalPayload = (order) => {
 
     return {
       slNo: slNoVal,
-      divCode: cleanValue(variant.div_code) || cleanValue(variant.divCode) || cleanValue(indent.div_code) || cleanValue(indent.divCode) || cleanValue(indent.division_code) || defaultDiv,
+      divCode: cleanValue(variant.div_code) || cleanValue(variant.divCode) || cleanValue(indent.div_code) || cleanValue(indent.divCode) || cleanValue(indent.division_code) || undefined,
       deptCode: cleanValue(variant.dept_code) || cleanValue(variant.deptCode) || cleanValue(indent.dept_code) || cleanValue(indent.deptCode) || undefined,
       costCode: cleanValue(variant.cost_code) || cleanValue(variant.costCode) || cleanValue(indent.cost_code) || cleanValue(indent.costCode) || undefined,
       itemCode: cleanValue(indent.product_id),
@@ -1128,6 +1125,9 @@ const createOrder = async ({ header, items }) => {
       }
 
       const normalizedItem = normalizeBodyItem(itemObject, index, normalizedHeader, gstNo);
+
+      // ⚠️ DEBUG — exact values going into ORDER_BODY
+      console.log(`[createOrder] ====> INSERT ORDER_BODY item[${index}]: ENTITY=${normalizedItem.ENTITY_CODE}, DIV_CODE=${normalizedItem.DIV_CODE}, DEPT=${normalizedItem.DEPT_CODE}, COST=${normalizedItem.COST_CODE}, ITEM=${normalizedItem.ITEM_CODE}`);
 
       // Set current date values for ORDER_BODY
       normalizedItem.AMENDDATE = currentDate;
