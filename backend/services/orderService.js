@@ -685,31 +685,101 @@ const validateOrder = (header, bodyItems) => {
 
 const getIndentDetails = async (connection, indentVrNo, itemCode) => {
   if (!indentVrNo || !itemCode) return null;
+  console.log(`[getIndentDetails] Searching => vrno: ${indentVrNo}, item: ${itemCode}`);
 
+  // ── 1. view_indent_engine (pending I-type indents) ────────────────────────────
   try {
-    const query = `
-      SELECT 
-        entity_code as "ENTITY_CODE",
-        div_code as "DIV_CODE",
-        dept_code as "DEPT_CODE",
-        cost_code as "COST_CODE",
-        slno as "SLNO",
-        um as "UM",
-        make_code as "MAKE_CODE",
-        user_code as "USER_CODE"
+    const r1 = await connection.execute(`
+      SELECT entity_code as "ENTITY_CODE", div_code as "DIV_CODE",
+             dept_code as "DEPT_CODE", cost_code as "COST_CODE",
+             slno as "SLNO", um as "UM", make_code as "MAKE_CODE", user_code as "USER_CODE"
       FROM view_indent_engine
       WHERE vrno = :indentVrNo AND item_code = :itemCode
-    `;
-    const result = await connection.execute(query, { indentVrNo, itemCode }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-    if (result.rows && result.rows.length > 0) {
-      const [firstRow] = result.rows;
-      return firstRow;
+    `, { indentVrNo, itemCode }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    if (r1.rows && r1.rows.length > 0) {
+      console.log(`[getIndentDetails] ✓ Found in view_indent_engine`);
+      return r1.rows[0];
     }
-    return null;
-  } catch (error) {
-    console.error(`Error querying view_indent_engine for indent: ${indentVrNo}, item: ${itemCode}:`, error.message);
-    return null;
-  }
+    console.log(`[getIndentDetails] ✗ Not in view_indent_engine`);
+  } catch (e) { console.error(`[getIndentDetails] view_indent_engine ERR:`, e.message); }
+
+  // ── 2. INDENT_BODY direct (no JOIN — catches all series incl. QC prefix) ─────
+  // NOTE: INDENT_BODY has no DEPT_CODE column — fetch from INDENT_HEAD separately
+  try {
+    const r2 = await connection.execute(`
+      SELECT ENTITY_CODE as "ENTITY_CODE", DIV_CODE as "DIV_CODE",
+             COST_CODE as "COST_CODE",
+             SLNO as "SLNO", UM as "UM", MAKE_CODE as "MAKE_CODE"
+      FROM INDENT_BODY
+      WHERE VRNO = :indentVrNo AND ITEM_CODE = :itemCode AND ROWNUM = 1
+    `, { indentVrNo, itemCode }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    if (r2.rows && r2.rows.length > 0) {
+      console.log(`[getIndentDetails] ✓ Found in INDENT_BODY (direct)`);
+      const row = r2.rows[0];
+      // fetch USER_CODE and DEPT_CODE from INDENT_HEAD separately
+      try {
+        const rh = await connection.execute(
+          `SELECT USER_CODE as "USER_CODE", DEPT_CODE as "DEPT_CODE" FROM INDENT_HEAD WHERE VRNO = :indentVrNo AND ROWNUM = 1`,
+          { indentVrNo }, { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        row.USER_CODE = (rh.rows && rh.rows.length > 0) ? rh.rows[0].USER_CODE : null;
+        row.DEPT_CODE  = (rh.rows && rh.rows.length > 0) ? rh.rows[0].DEPT_CODE  : null;
+      } catch (_) { row.USER_CODE = null; row.DEPT_CODE = null; }
+      return row;
+    }
+    console.log(`[getIndentDetails] ✗ Not in INDENT_BODY`);
+  } catch (e) { console.error(`[getIndentDetails] INDENT_BODY ERR:`, e.message); }
+
+  // ── 3. ORDER_BODY where INDENT_VRNO = indentVrNo (PO already exists) ─────────
+  try {
+    const r3 = await connection.execute(`
+      SELECT h.ENTITY_CODE as "ENTITY_CODE", b.DIV_CODE as "DIV_CODE",
+             b.DEPT_CODE as "DEPT_CODE", b.COST_CODE as "COST_CODE",
+             b.SLNO as "SLNO", b.UM as "UM", b.MAKE_CODE as "MAKE_CODE", h.USER_CODE as "USER_CODE"
+      FROM ORDER_BODY b
+      JOIN ORDER_HEAD h ON h.VRNO = b.VRNO AND h.ENTITY_CODE = b.ENTITY_CODE
+      WHERE b.INDENT_VRNO = :indentVrNo AND b.ITEM_CODE = :itemCode AND ROWNUM = 1
+    `, { indentVrNo, itemCode }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    if (r3.rows && r3.rows.length > 0) {
+      console.log(`[getIndentDetails] ✓ Found in ORDER_BODY (via INDENT_VRNO)`);
+      return r3.rows[0];
+    }
+    console.log(`[getIndentDetails] ✗ Not in ORDER_BODY(INDENT_VRNO)`);
+  } catch (e) { console.error(`[getIndentDetails] ORDER_BODY(indent_vrno) ERR:`, e.message); }
+
+  // ── 4. ORDER_BODY where VRNO = indentVrNo (QC stored as order type) ──────────
+  try {
+    const r4 = await connection.execute(`
+      SELECT h.ENTITY_CODE as "ENTITY_CODE", b.DIV_CODE as "DIV_CODE",
+             b.DEPT_CODE as "DEPT_CODE", b.COST_CODE as "COST_CODE",
+             b.SLNO as "SLNO", b.UM as "UM", b.MAKE_CODE as "MAKE_CODE", h.USER_CODE as "USER_CODE"
+      FROM ORDER_BODY b
+      JOIN ORDER_HEAD h ON h.VRNO = b.VRNO AND h.ENTITY_CODE = b.ENTITY_CODE
+      WHERE b.VRNO = :indentVrNo AND b.ITEM_CODE = :itemCode AND ROWNUM = 1
+    `, { indentVrNo, itemCode }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    if (r4.rows && r4.rows.length > 0) {
+      console.log(`[getIndentDetails] ✓ Found in ORDER_BODY (via VRNO)`);
+      return r4.rows[0];
+    }
+    console.log(`[getIndentDetails] ✗ Not in ORDER_BODY(VRNO)`);
+  } catch (e) { console.error(`[getIndentDetails] ORDER_BODY(vrno) ERR:`, e.message); }
+
+  // ── 5. ORDER_HEAD only — get entity/user as minimum fallback ─────────────────
+  try {
+    const r5 = await connection.execute(`
+      SELECT ENTITY_CODE as "ENTITY_CODE", USER_CODE as "USER_CODE",
+             NULL as "DIV_CODE", NULL as "DEPT_CODE", NULL as "COST_CODE",
+             NULL as "SLNO",    NULL as "UM",         NULL as "MAKE_CODE"
+      FROM ORDER_HEAD WHERE VRNO = :indentVrNo AND ROWNUM = 1
+    `, { indentVrNo }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    if (r5.rows && r5.rows.length > 0) {
+      console.log(`[getIndentDetails] ✓ Found in ORDER_HEAD (entity only, no div_code)`);
+      return r5.rows[0];
+    }
+  } catch (e) { console.error(`[getIndentDetails] ORDER_HEAD ERR:`, e.message); }
+
+  console.log(`[getIndentDetails] ✗ NOT FOUND in any source for ${indentVrNo}/${itemCode}`);
+  return null;
 };
 
 const mapExternalPayload = (order) => {
@@ -763,9 +833,10 @@ const mapExternalPayload = (order) => {
   const items = variants.map((variant, index) => {
     const indent = variant.indent_product || {};
     const slNoVal = toNumber(cleanValue(indent.slno) || cleanValue(indent.product_srno) || index + 1);
+
     return {
       slNo: slNoVal,
-      divCode: cleanValue(variant.div_code) || cleanValue(variant.divCode) || cleanValue(indent.division_code) || defaultDiv,
+      divCode: cleanValue(variant.div_code) || cleanValue(variant.divCode) || cleanValue(indent.div_code) || cleanValue(indent.divCode) || cleanValue(indent.division_code) || defaultDiv,
       deptCode: cleanValue(variant.dept_code) || cleanValue(variant.deptCode) || cleanValue(indent.dept_code) || cleanValue(indent.deptCode) || undefined,
       costCode: cleanValue(variant.cost_code) || cleanValue(variant.costCode) || cleanValue(indent.cost_code) || cleanValue(indent.costCode) || undefined,
       itemCode: cleanValue(indent.product_id),
