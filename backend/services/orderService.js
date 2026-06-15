@@ -703,7 +703,7 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
     console.log(`[getIndentDetails] ✗ Not in view_indent_engine`);
   } catch (e) { console.error(`[getIndentDetails] view_indent_engine ERR:`, e.message); }
 
-  // ── 2. INDENT_BODY direct (no JOIN — catches all series incl. QC prefix) ─────
+  // ── 2. INDENT_BODY: vrno + item_code (exact match) ────────────────────────────
   // NOTE: INDENT_BODY has no DEPT_CODE column — fetch from INDENT_HEAD separately
   try {
     const r2 = await connection.execute(`
@@ -714,21 +714,45 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
       WHERE VRNO = :indentVrNo AND ITEM_CODE = :itemCode AND ROWNUM = 1
     `, { indentVrNo, itemCode }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
     if (r2.rows && r2.rows.length > 0) {
-      console.log(`[getIndentDetails] ✓ Found in INDENT_BODY (direct)`);
+      console.log(`[getIndentDetails] ✓ Found in INDENT_BODY (vrno+item)`);
       const row = r2.rows[0];
-      // fetch USER_CODE and DEPT_CODE from INDENT_HEAD separately
       try {
         const rh = await connection.execute(
           `SELECT USER_CODE as "USER_CODE", DEPT_CODE as "DEPT_CODE" FROM INDENT_HEAD WHERE VRNO = :indentVrNo AND ROWNUM = 1`,
           { indentVrNo }, { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
         row.USER_CODE = (rh.rows && rh.rows.length > 0) ? rh.rows[0].USER_CODE : null;
-        row.DEPT_CODE  = (rh.rows && rh.rows.length > 0) ? rh.rows[0].DEPT_CODE  : null;
+        row.DEPT_CODE = (rh.rows && rh.rows.length > 0) ? rh.rows[0].DEPT_CODE : null;
       } catch (_) { row.USER_CODE = null; row.DEPT_CODE = null; }
       return row;
     }
-    console.log(`[getIndentDetails] ✗ Not in INDENT_BODY`);
+    console.log(`[getIndentDetails] ✗ Not in INDENT_BODY (vrno+item)`);
   } catch (e) { console.error(`[getIndentDetails] INDENT_BODY ERR:`, e.message); }
+
+  // ── 2b. INDENT_BODY: vrno only — get entity+div even if item doesn't match ───
+  try {
+    const r2b = await connection.execute(`
+      SELECT ENTITY_CODE as "ENTITY_CODE", DIV_CODE as "DIV_CODE",
+             COST_CODE as "COST_CODE", UM as "UM",
+             NULL as "SLNO", NULL as "MAKE_CODE"
+      FROM INDENT_BODY
+      WHERE VRNO = :indentVrNo AND ROWNUM = 1
+    `, { indentVrNo }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    if (r2b.rows && r2b.rows.length > 0) {
+      console.log(`[getIndentDetails] ✓ Found in INDENT_BODY (vrno-only, no item match)`);
+      const row = r2b.rows[0];
+      try {
+        const rh = await connection.execute(
+          `SELECT USER_CODE as "USER_CODE", DEPT_CODE as "DEPT_CODE" FROM INDENT_HEAD WHERE VRNO = :indentVrNo AND ROWNUM = 1`,
+          { indentVrNo }, { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        row.USER_CODE = (rh.rows && rh.rows.length > 0) ? rh.rows[0].USER_CODE : null;
+        row.DEPT_CODE = (rh.rows && rh.rows.length > 0) ? rh.rows[0].DEPT_CODE : null;
+      } catch (_) { row.USER_CODE = null; row.DEPT_CODE = null; }
+      return row;
+    }
+    console.log(`[getIndentDetails] ✗ Not in INDENT_BODY (vrno-only)`);
+  } catch (e) { console.error(`[getIndentDetails] INDENT_BODY(vrno-only) ERR:`, e.message); }
 
   // ── 3. ORDER_BODY where INDENT_VRNO = indentVrNo (PO already exists) ─────────
   try {
@@ -1057,7 +1081,7 @@ const createOrder = async ({ header, items }) => {
       }
 
       if (dbIndent) {
-        console.log(`Found database indent details for ${indentVrNo} / ${itemCode}:`, dbIndent);
+        console.log(`[createOrder] Found indent for ${indentVrNo}/${itemCode}:`, JSON.stringify(dbIndent));
 
         const isValBlank = (val) => {
           return val === null || val === undefined || (typeof val === 'string' && val.trim() === '');
@@ -1068,6 +1092,7 @@ const createOrder = async ({ header, items }) => {
         }
         if (isValBlank(itemObject.DIV_CODE) && isValBlank(itemObject.divCode) && isValBlank(itemObject.division_code)) {
           itemObject.DIV_CODE = dbIndent.DIV_CODE;
+          console.log(`[createOrder] DIV_CODE set from DB: ${dbIndent.DIV_CODE} for ${indentVrNo}`);
         }
         if (isValBlank(itemObject.DEPT_CODE) && isValBlank(itemObject.deptCode) && isValBlank(itemObject.dept_code)) {
           itemObject.DEPT_CODE = dbIndent.DEPT_CODE;
