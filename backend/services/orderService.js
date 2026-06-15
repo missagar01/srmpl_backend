@@ -872,8 +872,8 @@ const mapExternalPayload = (order) => {
       dueDate: dueDate,
       stockType: 'R',
       orderTolerance: toNumber(variant.order_tolerance || variant.orderTolerance, 0),
-      irate: toNumber(variant.order_discount || variant.orderDiscount, 0) > 0 ? 'P' : undefined,
-      iratei: toNumber(variant.order_discount || variant.orderDiscount, 0) > 0 ? toNumber(variant.order_discount || variant.orderDiscount, 0) : undefined
+      irate: toNumber(variant.order_discount || variant.orderDiscount, 0) > 0 ? toNumber(variant.order_discount || variant.orderDiscount, 0) : undefined,
+      iratei: undefined
     };
   });
 
