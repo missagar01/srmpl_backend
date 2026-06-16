@@ -190,6 +190,8 @@ const BODY_COLUMN_MAP = new Map([
   ['dueDate', 'DUEDATE'],
   ['stockType', 'STOCK_TYPE'],
   ['remark', 'REMARK'],
+  ['remarks', 'REMARK'],
+  ['remaks', 'REMARK'],
   ['irate', 'IRATE'],
   ['iratei', 'IRATEI'],
   ['taxRate', 'TAX_RATE'],
@@ -853,7 +855,8 @@ const mapExternalPayload = (order) => {
 
   const items = variants.map((variant, index) => {
     const indent = variant.indent_product || {};
-    const slNoVal = toNumber(cleanValue(indent.slno) || cleanValue(indent.product_srno) || index + 1);
+    const slNoVal = index + 1;
+    const indentSlNoVal = toNumber(cleanValue(indent.product_srno) || cleanValue(indent.slno)) || undefined;
 
     return {
       slNo: slNoVal,
@@ -868,9 +871,10 @@ const mapExternalPayload = (order) => {
       gst: toNumber(variant.gst || variant.product_gst || variant.gst_rate || variant.tax_rate || variant.taxRate || variant.gstRate || indent.gst_rate || indent.gst, 0),
       indentTCode: 'I',
       indentVrNo: cleanValue(indent.indent_number),
-      indentSlNo: slNoVal,
+      indentSlNo: indentSlNoVal,
       dueDate: dueDate,
       stockType: 'R',
+      remark: cleanValue(variant.remarks) || cleanValue(variant.remark) || cleanValue(variant.remaks) || cleanValue(indent.remarks) || cleanValue(indent.remark) || cleanValue(indent.remaks) || undefined,
       orderTolerance: toNumber(variant.order_tolerance || variant.orderTolerance, 0),
       irate: toNumber(variant.order_discount || variant.orderDiscount, 0) > 0 ? toNumber(variant.order_discount || variant.orderDiscount, 0) : undefined,
       iratei: undefined
@@ -1100,7 +1104,7 @@ const createOrder = async ({ header, items }) => {
         if (isValBlank(itemObject.SLNO) && isValBlank(itemObject.slNo) && isValBlank(itemObject.slno)) {
           itemObject.SLNO = dbIndent.SLNO;
         }
-        if (isValBlank(itemObject.indentSlNo) && isValBlank(itemObject.INDENT_SLNO) && isValBlank(itemObject.indent_slno)) {
+        if (!isValBlank(dbIndent.SLNO)) {
           itemObject.indentSlNo = dbIndent.SLNO;
         }
         if (isValBlank(itemObject.UM) && isValBlank(itemObject.um) && isValBlank(itemObject.uom)) {
