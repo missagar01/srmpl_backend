@@ -694,7 +694,8 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
     const r1 = await connection.execute(`
       SELECT entity_code as "ENTITY_CODE", div_code as "DIV_CODE",
              dept_code as "DEPT_CODE", cost_code as "COST_CODE",
-             slno as "SLNO", um as "UM", make_code as "MAKE_CODE", user_code as "USER_CODE"
+             slno as "SLNO", um as "UM", make_code as "MAKE_CODE", user_code as "USER_CODE",
+             remark as "REMARK"
       FROM view_indent_engine
       WHERE vrno = :indentVrNo AND item_code = :itemCode
     `, { indentVrNo, itemCode }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
@@ -711,7 +712,8 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
     const r2 = await connection.execute(`
       SELECT ENTITY_CODE as "ENTITY_CODE", DIV_CODE as "DIV_CODE",
              COST_CODE as "COST_CODE",
-             SLNO as "SLNO", UM as "UM", MAKE_CODE as "MAKE_CODE"
+             SLNO as "SLNO", UM as "UM", MAKE_CODE as "MAKE_CODE",
+             REMARK as "REMARK"
       FROM INDENT_BODY
       WHERE VRNO = :indentVrNo AND ITEM_CODE = :itemCode AND ROWNUM = 1
     `, { indentVrNo, itemCode }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
@@ -736,7 +738,7 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
     const r2b = await connection.execute(`
       SELECT ENTITY_CODE as "ENTITY_CODE", DIV_CODE as "DIV_CODE",
              COST_CODE as "COST_CODE", UM as "UM",
-             NULL as "SLNO", NULL as "MAKE_CODE"
+             NULL as "SLNO", NULL as "MAKE_CODE", REMARK as "REMARK"
       FROM INDENT_BODY
       WHERE VRNO = :indentVrNo AND ROWNUM = 1
     `, { indentVrNo }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
@@ -761,7 +763,8 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
     const r3 = await connection.execute(`
       SELECT h.ENTITY_CODE as "ENTITY_CODE", b.DIV_CODE as "DIV_CODE",
              b.DEPT_CODE as "DEPT_CODE", b.COST_CODE as "COST_CODE",
-             b.SLNO as "SLNO", b.UM as "UM", b.MAKE_CODE as "MAKE_CODE", h.USER_CODE as "USER_CODE"
+             b.SLNO as "SLNO", b.UM as "UM", b.MAKE_CODE as "MAKE_CODE", h.USER_CODE as "USER_CODE",
+             b.REMARK as "REMARK"
       FROM ORDER_BODY b
       JOIN ORDER_HEAD h ON h.VRNO = b.VRNO AND h.ENTITY_CODE = b.ENTITY_CODE
       WHERE b.INDENT_VRNO = :indentVrNo AND b.ITEM_CODE = :itemCode AND ROWNUM = 1
@@ -778,7 +781,8 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
     const r4 = await connection.execute(`
       SELECT h.ENTITY_CODE as "ENTITY_CODE", b.DIV_CODE as "DIV_CODE",
              b.DEPT_CODE as "DEPT_CODE", b.COST_CODE as "COST_CODE",
-             b.SLNO as "SLNO", b.UM as "UM", b.MAKE_CODE as "MAKE_CODE", h.USER_CODE as "USER_CODE"
+             b.SLNO as "SLNO", b.UM as "UM", b.MAKE_CODE as "MAKE_CODE", h.USER_CODE as "USER_CODE",
+             b.REMARK as "REMARK"
       FROM ORDER_BODY b
       JOIN ORDER_HEAD h ON h.VRNO = b.VRNO AND h.ENTITY_CODE = b.ENTITY_CODE
       WHERE b.VRNO = :indentVrNo AND b.ITEM_CODE = :itemCode AND ROWNUM = 1
@@ -795,7 +799,8 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
     const r5 = await connection.execute(`
       SELECT ENTITY_CODE as "ENTITY_CODE", USER_CODE as "USER_CODE",
              NULL as "DIV_CODE", NULL as "DEPT_CODE", NULL as "COST_CODE",
-             NULL as "SLNO",    NULL as "UM",         NULL as "MAKE_CODE"
+             NULL as "SLNO",    NULL as "UM",         NULL as "MAKE_CODE",
+             NULL as "REMARK"
       FROM ORDER_HEAD WHERE VRNO = :indentVrNo AND ROWNUM = 1
     `, { indentVrNo }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
     if (r5.rows && r5.rows.length > 0) {
@@ -1075,6 +1080,11 @@ const createOrder = async ({ header, items }) => {
 
       const itemCode = getValue(itemObject, 'itemCode', 'ITEM_CODE', 'product_id');
       const indentVrNo = getValue(itemObject, 'indentVrNo', 'INDENT_VRNO', 'indent_number');
+      let indentSlNo = getValue(itemObject, 'indentSlNo', 'INDENT_SLNO', 'indent_slno', 'product_srno', 'slno');
+
+      if (itemCode) itemObject.itemCode = itemCode;
+      if (indentVrNo) itemObject.indentVrNo = indentVrNo;
+      if (indentSlNo) itemObject.indentSlNo = indentSlNo;
 
       let dbIndent = null;
       if (indentVrNo && itemCode) {
@@ -1112,6 +1122,11 @@ const createOrder = async ({ header, items }) => {
         }
         if (isValBlank(itemObject.MAKE_CODE) && isValBlank(itemObject.makeCode) && isValBlank(itemObject.make_code)) {
           itemObject.MAKE_CODE = dbIndent.MAKE_CODE;
+        }
+        if (dbIndent.REMARK) {
+          if (isValBlank(itemObject.remark) && isValBlank(itemObject.remarks) && isValBlank(itemObject.REMARK)) {
+            itemObject.remark = dbIndent.REMARK;
+          }
         }
 
         if (dbIndent.USER_CODE) {
