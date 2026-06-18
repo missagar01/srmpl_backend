@@ -1086,6 +1086,30 @@ const createOrder = async ({ header, items }) => {
       if (indentVrNo) itemObject.indentVrNo = indentVrNo;
       if (indentSlNo) itemObject.indentSlNo = indentSlNo;
 
+      // Lookup GST_CODE from ITEM_MAST
+      let dbGstCode = null;
+      if (itemCode) {
+        try {
+          const itemMastResult = await connection.execute(
+            `SELECT GST_CODE FROM ITEM_MAST WHERE ITEM_CODE = :itemCode AND ROWNUM = 1`,
+            { itemCode: itemCode.trim() },
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
+          );
+          if (itemMastResult.rows && itemMastResult.rows.length > 0) {
+            dbGstCode = itemMastResult.rows[0].GST_CODE || itemMastResult.rows[0].gst_code || null;
+            if (dbGstCode) {
+              dbGstCode = dbGstCode.trim();
+            }
+          }
+        } catch (err) {
+          console.error(`Error querying ITEM_MAST for itemCode ${itemCode}:`, err.message);
+        }
+      }
+
+      if (dbGstCode) {
+        itemObject.gstCode = dbGstCode;
+      }
+
       let dbIndent = null;
       if (indentVrNo && itemCode) {
         dbIndent = await getIndentDetails(connection, indentVrNo.trim(), itemCode.trim());
@@ -1146,7 +1170,7 @@ const createOrder = async ({ header, items }) => {
       const normalizedItem = normalizeBodyItem(itemObject, index, normalizedHeader, gstNo);
 
       // ⚠️ DEBUG — exact values going into ORDER_BODY
-      console.log(`[createOrder] ====> INSERT ORDER_BODY item[${index}]: ENTITY=${normalizedItem.ENTITY_CODE}, DIV_CODE=${normalizedItem.DIV_CODE}, DEPT=${normalizedItem.DEPT_CODE}, COST=${normalizedItem.COST_CODE}, ITEM=${normalizedItem.ITEM_CODE}`);
+      console.log(`[createOrder] ====> INSERT ORDER_BODY item[${index}]: ENTITY=${normalizedItem.ENTITY_CODE}, DIV_CODE=${normalizedItem.DIV_CODE}, DEPT=${normalizedItem.DEPT_CODE}, COST=${normalizedItem.COST_CODE}, ITEM=${normalizedItem.ITEM_CODE}, GST_CODE=${normalizedItem.GST_CODE}`);
 
       // Set current date values for ORDER_BODY
       normalizedItem.AMENDDATE = currentDate;
