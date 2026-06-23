@@ -1010,7 +1010,7 @@ const createOrder = async ({ header, items }) => {
     if (gstNo) {
       console.log(`Looking up ADDRESS_MAST details for GST: ${gstNo}`);
       const gstResult = await connection.execute(
-        'SELECT ACC_CODE, SLNO FROM ADDRESS_MAST WHERE GSTINNO = :gstNo',
+        'SELECT ACC_CODE, SLNO FROM ADDRESS_MAST t WHERE GSTINNO = :gstNo and substr(t.acc_code,0,1) = \'E\'',
         { gstNo },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
