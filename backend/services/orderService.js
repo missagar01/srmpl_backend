@@ -815,7 +815,7 @@ const getIndentDetails = async (connection, indentVrNo, itemCode) => {
 
 const mapExternalPayload = (order) => {
   const variants = Array.isArray(order.order_variants) ? order.order_variants : [];
-  const firstIndent = variants.at(0)?.indent_product || {};
+  const firstIndent = variants.at(0)?.indent_product || variants.at(0)?.indent_products || {};
   const gstNo = cleanValue(order.vendor?.gstin);
   const entityCode = cleanValue(firstIndent.entity_code) || undefined;
 
@@ -859,9 +859,10 @@ const mapExternalPayload = (order) => {
   // DB lookup (getIndentDetails) can fill in the correct DIV_CODE from INDENT_BODY.
 
   const items = variants.map((variant, index) => {
-    const indent = variant.indent_product || {};
+    const indent = variant.indent_product || variant.indent_products || {};
     const slNoVal = index + 1;
-    const indentSlNoVal = toNumber(cleanValue(indent.product_srno) || cleanValue(indent.slno)) || undefined;
+    const rawProductSrNo = !isBlank(indent.product_srno) ? indent.product_srno : indent.slno;
+    const indentSlNoVal = !isBlank(rawProductSrNo) ? toNumber(rawProductSrNo) : undefined;
 
     return {
       slNo: slNoVal,
@@ -1138,8 +1139,14 @@ const createOrder = async ({ header, items }) => {
         if (isValBlank(itemObject.SLNO) && isValBlank(itemObject.slNo) && isValBlank(itemObject.slno)) {
           itemObject.SLNO = dbIndent.SLNO;
         }
-        if (!isValBlank(dbIndent.SLNO)) {
-          itemObject.indentSlNo = dbIndent.SLNO;
+        const isIndentSlNoBlank = (val) => {
+          return val === null || val === undefined || val === 0 || val === '0' || (typeof val === 'string' && val.trim() === '');
+        };
+
+        if (isIndentSlNoBlank(itemObject.indentSlNo)) {
+          if (!isValBlank(dbIndent.SLNO)) {
+            itemObject.indentSlNo = dbIndent.SLNO;
+          }
         }
         if (isValBlank(itemObject.UM) && isValBlank(itemObject.um) && isValBlank(itemObject.uom)) {
           itemObject.UM = dbIndent.UM;
