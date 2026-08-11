@@ -61,7 +61,7 @@ function createSshTunnel() {
       }
     }
 
-    console.log(`[SSH Tunnel] Establishing tunnel to ${sshUser}@${sshHost}:${sshPort}...`);
+    console.log('[SSH Tunnel] Establishing tunnel...');
     const sshClient = new Client();
 
     sshClient.on('ready', () => {
