@@ -12,6 +12,10 @@ try {
   console.error('Failed to initialize Oracle Client:', err);
 }
 
+// If Oracle stops responding mid-call, fail after 30s instead of hanging
+// forever (a hung call kept the indent-sync cron marked "running" indefinitely).
+oracledb.callTimeout = 30000;
+
 let activeTunnel = null;
 let tunnelPromise = null;
 
@@ -69,6 +73,12 @@ function createSshTunnel() {
 
       const server = net.createServer((socket) => {
         // Forward connection from local port through the SSH channel to the remote DB server
+        socket.on('error', (sockErr) => {
+          // Without this listener, a dropped/refused DB connection emits an
+          // 'error' event with no handler, which crashes the whole Node process.
+          console.error('[SSH Tunnel] Local socket error (DB likely unreachable):', sockErr.message);
+        });
+
         sshClient.forwardOut(
           '127.0.0.1',
           socket.remotePort,
@@ -80,6 +90,10 @@ function createSshTunnel() {
               socket.end();
               return;
             }
+            stream.on('error', (streamErr) => {
+              console.error('[SSH Tunnel] Forwarded stream error (DB likely unreachable):', streamErr.message);
+              socket.destroy();
+            });
             socket.pipe(stream).pipe(socket);
           }
         );
@@ -104,11 +118,20 @@ function createSshTunnel() {
       reject(err);
     });
 
+    // If the SSH link drops later (network blip, DB host reboot), reset state
+    // so the next getConnection() call re-establishes a fresh tunnel instead
+    // of reusing a dead one forever.
+    sshClient.on('close', () => {
+      console.warn('[SSH Tunnel] SSH connection closed.');
+      cleanupTunnel();
+    });
+
     sshClient.connect({
       host: sshHost,
       port: sshPort,
       username: sshUser,
-      password: sshPassword
+      password: sshPassword,
+      readyTimeout: 20000
     });
   });
 

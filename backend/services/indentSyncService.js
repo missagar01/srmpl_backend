@@ -13,6 +13,7 @@ const getApprovedIndentsToday = async (connection) => {
       ib.APPROVEDBY    AS "userCode",
       um.USER_NAME     AS "userName",
       ib.VRNO          AS "indentNumber",
+      ib.APPROVEDDATE  AS "approvedDate",
       ib.SLNO          AS "productSrno",
       ib.ITEM_CODE     AS "productId",
       NVL(im.SHORTNAME, im.ITEM_NAME) AS "productName",
@@ -126,7 +127,9 @@ const syncPendingIndents = async () => {
 
         if (success) {
           await markAsSent(connection, group.rows);
-          const sentDetails = group.rows.map(row => `${row.indentNumber}/${row.productId}`).join(', ');
+          const sentDetails = group.rows
+            .map(row => `${row.indentNumber}/${row.productId} (approved ${row.approvedDate ? row.approvedDate.toISOString() : 'unknown'})`)
+            .join(', ');
           console.log(`[indentSync] Sent ${group.rows.length} item(s) for entity ${entityCode}: ${sentDetails}`);
         } else {
           console.error(`[indentSync] API rejected entity ${entityCode}:`, response.status, JSON.stringify(response.data));
