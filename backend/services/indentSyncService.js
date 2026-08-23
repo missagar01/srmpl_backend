@@ -140,6 +140,7 @@ const syncPendingIndents = async () => {
     }
   } catch (err) {
     console.error('[indentSync] Run failed:', err.message);
+    throw err;
   } finally {
     if (connection) await connection.close();
   }
