@@ -17,6 +17,7 @@ const getApprovedIndentsToday = async (connection) => {
       ib.SLNO          AS "productSrno",
       ib.ITEM_CODE     AS "productId",
       NVL(im.SHORTNAME, im.ITEM_NAME) AS "productName",
+      ib.REMARK        AS "remark",
       im.ITEM_NAME     AS "productSpecs",
       im.ITEM_SIZE     AS "productSize",
       ib.UM            AS "uom",
@@ -46,11 +47,18 @@ const cleanText = (value) => {
   return String(value).trim().replace(/[^\w\s.,\/()\-&]/g, '');
 };
 
+// item_name should carry the indent's own remark alongside the item name
+const buildProductName = (row) => {
+  const name = row.productName || '';
+  const remark = row.remark ? String(row.remark).trim() : '';
+  return remark ? `${name} ${remark}` : name;
+};
+
 const buildProduct = (row) => ({
   indent_number: row.indentNumber || '',
   product_srno: row.productSrno ?? '',
   product_id: row.productId || '',
-  product_name: cleanText(row.productName),
+  product_name: cleanText(buildProductName(row)),
   product_specs: cleanText(row.productSpecs),
   product_size: cleanText(row.productSize),
   uom: cleanText(row.uom),
