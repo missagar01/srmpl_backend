@@ -16,7 +16,7 @@ const getApprovedIndentsToday = async (connection) => {
       ib.APPROVEDDATE  AS "approvedDate",
       ib.SLNO          AS "productSrno",
       ib.ITEM_CODE     AS "productId",
-      NVL(im.SHORTNAME, im.ITEM_NAME) AS "productName",
+      im.SHORTNAME     AS "productShortName",
       ib.REMARK        AS "remark",
       im.ITEM_NAME     AS "productSpecs",
       im.ITEM_SIZE     AS "productSize",
@@ -47,11 +47,19 @@ const cleanText = (value) => {
   return String(value).trim().replace(/[^\w\s.,\/()\-&]/g, '');
 };
 
-// item_name should carry the indent's own remark alongside the item name
+// SHORTNAME is often a placeholder (a lone dot, one or two letters) - treat those as
+// missing and fall back to the full item name.
 const buildProductName = (row) => {
-  const name = row.productName || '';
+  const shortName = row.productShortName ? String(row.productShortName).trim() : '';
+  const meaningfulChars = shortName.replace(/[^a-zA-Z0-9]/g, '');
+  return meaningfulChars.length >= 3 ? shortName : (row.productSpecs || '');
+};
+
+// product_specs should carry the indent's own remark alongside the item name
+const buildProductSpecs = (row) => {
+  const specs = row.productSpecs || '';
   const remark = row.remark ? String(row.remark).trim() : '';
-  return remark ? `${name} ${remark}` : name;
+  return remark ? `${specs} ${remark}` : specs;
 };
 
 const buildProduct = (row) => ({
@@ -59,7 +67,7 @@ const buildProduct = (row) => ({
   product_srno: row.productSrno ?? '',
   product_id: row.productId || '',
   product_name: cleanText(buildProductName(row)),
-  product_specs: cleanText(row.productSpecs),
+  product_specs: cleanText(buildProductSpecs(row)),
   product_size: cleanText(row.productSize),
   uom: cleanText(row.uom),
   product_brand: cleanText(row.productBrand),
