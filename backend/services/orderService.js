@@ -909,8 +909,28 @@ const lookupUserCodeByName = async (connection, userName) => {
   }
 };
 
-const createOrder = async ({ header, items }) => {
+// Errors that mean "the DB/tunnel hiccuped, the work never landed" - safe to
+// retry as long as we hadn't started COMMIT yet.
+const TRANSIENT_ORA_NUMS = new Set([
+  18, 20, 115, 1033, 1034, 1089, 3113, 3114, 3135,
+  12152, 12170, 12257, 12514, 12518, 12520, 12521, 12537, 12541, 12571,
+  24418, 25408
+]);
+
+const isTransientDbError = (err) => {
+  if (!err) return false;
+  if (TRANSIENT_ORA_NUMS.has(Number(err.errorNum))) return true;
+  const msg = String(err.message || '');
+  if (/ORA-(00018|00020|00115|01033|01034|01089|03113|03114|03135|12152|12170|12257|12514|12518|12520|12521|12537|12541|12571|24418|25408)/.test(msg)) return true;
+  if (/NJS-0(02|03|04|40|64|65)|DPI-1010|DPI-1080|connection (pool )?(closed|not open)/i.test(msg)) return true;
+  if (/ETIMEDOUT|ECONNRESET|ECONNREFUSED|EPIPE|socket hang up/i.test(msg)) return true;
+  return false;
+};
+
+const createOrderOnce = async ({ header, items }) => {
   let connection;
+  let commitStarted = false;
+  let generatedVrNo = null;
   try {
     connection = await getConnection();
 
@@ -984,6 +1004,7 @@ const createOrder = async ({ header, items }) => {
       throw new Error("Failed to generate new VRNO using sequence query.");
     }
     const newVrNo = firstSeqRow.new_vrno;
+    generatedVrNo = newVrNo;
     console.log(`Generated new VRNO: ${newVrNo} for entity ${entityCode}`);
 
     // Update sequence table vrseq_mast
@@ -1212,16 +1233,42 @@ const createOrder = async ({ header, items }) => {
       await connection.execute(bodyInsert.sql, bodyInsert.binds, { autoCommit: false });
     }
 
+    commitStarted = true;
     await connection.commit();
     return {
       message: `Order ${normalizedHeader.VRNO} created successfully with Account ${normalizedHeader.ACC_CODE}`,
       header: normalizedHeader
     };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection && !commitStarted) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    // Retryable only if nothing was ever committed. Once COMMIT has been issued
+    // the outcome is ambiguous - never auto-retry that (would risk a duplicate PO).
+    err.retryable = !commitStarted && isTransientDbError(err);
+    if (commitStarted && isTransientDbError(err)) {
+      err.message = `Order COMMIT outcome unknown for VRNO ${generatedVrNo} - verify in ERP before resubmitting. Cause: ${err.message}`;
+    }
     throw err;
   } finally {
-    if (connection) await connection.close();
+    if (connection) {
+      try { await connection.close(); } catch (_) {}
+    }
+  }
+};
+
+// Public entry point: run the insert, and if it failed on a transient DB/tunnel
+// blip *before* commit, try exactly once more with a fresh connection and a
+// fresh VRNO. An in-progress indent sync can't cause this, but a tunnel hiccup
+// still can - this keeps a PO from failing over a momentary glitch.
+const createOrder = async (payload) => {
+  try {
+    return await createOrderOnce(payload);
+  } catch (err) {
+    if (!err || !err.retryable) throw err;
+    console.warn(`[orderService] Transient DB error before commit - retrying once: ${err.message}`);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return await createOrderOnce(payload);
   }
 };
 

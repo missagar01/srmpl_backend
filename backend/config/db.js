@@ -31,14 +31,21 @@ function cleanupTunnel() {
     activeTunnel = null;
     tunnelPromise = null;
   }
+  // The tunnel is what every pooled connection rides on. Once it's gone, every
+  // connection in both pools is dead - tear the pools down so the next
+  // getConnection()/getJobConnection() rebuilds them over a fresh tunnel
+  // instead of handing out sockets that will just throw.
+  destroyPools('ssh tunnel closed');
 }
 
 // Handle application exits cleanly
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
+  await destroyPools('SIGINT');
   cleanupTunnel();
   process.exit(0);
 });
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
+  await destroyPools('SIGTERM');
   cleanupTunnel();
   process.exit(0);
 });
@@ -158,17 +165,126 @@ const getDbConfig = () => {
   };
 };
 
-async function getConnection() {
-  if (process.env.SSH_HOST) {
-    // Make sure SSH Tunnel is created before returning connection
-    await createSshTunnel();
+// ─── Connection pools ────────────────────────────────────────────────────────
+// Two physically separate pools so the two workloads can never compete for the
+// same connection slots:
+//
+//   HTTP_POOL  - every API request (order insert, chatbot). Sized for real
+//                traffic; an order POST always draws from here.
+//   JOB_POOL   - the once-a-minute indent-sync cron only. Capped at a single
+//                connection, so no matter how long a sync takes it can consume
+//                at most one server session and cannot touch HTTP_POOL.
+//
+// Result: an in-progress indent sync has zero effect on order-API latency or
+// on a purchase order being created.
+
+const HTTP_POOL = 'http';
+const JOB_POOL = 'job';
+
+const poolConfigs = {
+  [HTTP_POOL]: {
+    poolAlias: HTTP_POOL,
+    poolMin: Number(process.env.DB_POOL_MIN || 2),
+    poolMax: Number(process.env.DB_POOL_MAX || 10),
+    poolIncrement: 1,
+    poolTimeout: 120,          // secs an idle connection lingers before close
+    queueTimeout: Number(process.env.DB_QUEUE_TIMEOUT_MS || 15000),
+    queueMax: Number(process.env.DB_QUEUE_MAX || 50),
+    pingInterval: 10,          // re-validate idle connections quickly after a blip
+  },
+  [JOB_POOL]: {
+    poolAlias: JOB_POOL,
+    poolMin: 0,
+    poolMax: 1,
+    poolIncrement: 1,
+    poolTimeout: 30,
+    queueTimeout: Number(process.env.DB_JOB_QUEUE_TIMEOUT_MS || 8000),
+    queueMax: 4,
+    pingInterval: 10,
+  },
+};
+
+// One in-flight init promise per pool alias; cleared on failure/teardown so the
+// next caller retries a clean build.
+const poolInitPromises = {};
+
+async function ensurePool(alias) {
+  if (poolInitPromises[alias]) return poolInitPromises[alias];
+
+  poolInitPromises[alias] = (async () => {
+    if (process.env.SSH_HOST) {
+      // Make sure the SSH tunnel is up before the pool dials the DB.
+      await createSshTunnel();
+    }
+
+    // A pool for this alias may still be registered from a previous life
+    // (e.g. tunnel dropped mid-request). Close it before recreating.
+    try {
+      const existing = oracledb.getPool(alias);
+      if (existing) {
+        try { await existing.close(0); } catch (e) {}
+      }
+    } catch (e) { /* no pool registered - fine */ }
+
+    const config = getDbConfig();
+    const pool = await oracledb.createPool({ ...config, ...poolConfigs[alias] });
+    console.log(
+      `[DB] Pool "${alias}" ready (min ${pool.poolMin}, max ${pool.poolMax}).`
+    );
+    return pool;
+  })().catch((err) => {
+    // Don't cache a rejected init - let the next call try again.
+    poolInitPromises[alias] = null;
+    throw err;
+  });
+
+  return poolInitPromises[alias];
+}
+
+async function destroyPools(reason) {
+  const aliases = Object.keys(poolConfigs);
+  for (const alias of aliases) {
+    poolInitPromises[alias] = null;
+    try {
+      const pool = oracledb.getPool(alias);
+      if (pool) {
+        console.warn(`[DB] Tearing down pool "${alias}" (${reason}).`);
+        try { await pool.close(0); } catch (e) {}
+      }
+    } catch (e) { /* nothing registered */ }
   }
-  const config = getDbConfig();
-  return await oracledb.getConnection(config);
+}
+
+async function getConnectionFromPool(alias) {
+  await ensurePool(alias);
+  try {
+    return await oracledb.getConnection(alias);
+  } catch (err) {
+    // If the pool itself is broken (tunnel died, pool closed underneath us),
+    // drop it so the retry rebuilds cleanly rather than hitting the same
+    // dead pool again.
+    const msg = String(err && err.message || '');
+    if (/NJS-0(02|03|04|65)|pool is (closed|draining)|not (open|connected)/i.test(msg)) {
+      await destroyPools(`getConnection failed on "${alias}": ${msg}`);
+    }
+    throw err;
+  }
+}
+
+// Every HTTP request path uses this.
+async function getConnection() {
+  return getConnectionFromPool(HTTP_POOL);
+}
+
+// The indent-sync cron - and only the cron - uses this.
+async function getJobConnection() {
+  return getConnectionFromPool(JOB_POOL);
 }
 
 module.exports = {
   oracledb,
   getConnection,
-  getDbConfig
+  getJobConnection,
+  getDbConfig,
+  destroyPools,
 };

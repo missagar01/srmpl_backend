@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { oracledb, getConnection } = require('../config/db');
+const { oracledb, getJobConnection } = require('../config/db');
 
 /**
  * Indent items approved today, not yet pushed to the vendor portal.
@@ -97,14 +97,14 @@ const markAsSent = async (connection, rows) => {
     SET CBP_REMARK = 'SENT', CBPBY = 'AUTOSYNC', CBPDATE = SYSDATE
     WHERE ENTITY_CODE = :entityCode AND VRNO = :indentNumber AND SLNO = :productSrno
   `;
-  for (const row of rows) {
-    await connection.execute(sql, {
-      entityCode: row.entityCode,
-      indentNumber: row.indentNumber,
-      productSrno: row.productSrno
-    }, { autoCommit: false });
-  }
-  await connection.commit();
+  const binds = rows.map((row) => ({
+    entityCode: row.entityCode,
+    indentNumber: row.indentNumber,
+    productSrno: row.productSrno
+  }));
+  // Single batched round-trip + immediate commit. Keeps the row locks on
+  // INDENT_BODY open for milliseconds instead of the length of the update loop.
+  await connection.executeMany(sql, binds, { autoCommit: true });
 };
 
 const syncPendingIndents = async () => {
@@ -114,51 +114,70 @@ const syncPendingIndents = async () => {
     return;
   }
 
-  let connection;
+  // 1. Read the pending rows, then hand the connection straight back to the
+  //    (single-slot) job pool BEFORE any slow outbound HTTP - the job never
+  //    holds a DB session open across the vendor call.
+  let rows;
+  let readConn;
   try {
-    connection = await getConnection();
-
-    const rows = await getApprovedIndentsToday(connection);
-    if (rows.length === 0) {
-      return;
-    }
-
-    console.log(`[indentSync] Found ${rows.length} approved indent item(s) to sync.`);
-
-    const groups = groupByEntity(rows);
-
-    for (const [entityCode, group] of groups) {
-      const payload = {
-        entity_gst: group.entityGst,
-        products: group.rows.map(buildProduct)
-      };
-
-      try {
-        const response = await axios.post(apiUrl, payload, {
-          headers: { 'Content-Type': 'application/json' },
-          validateStatus: () => true
-        });
-
-        const success = response.status >= 200 && response.status < 300 && response.data?.status === true;
-
-        if (success) {
-          await markAsSent(connection, group.rows);
-          const sentDetails = group.rows
-            .map(row => `${row.indentNumber}/${row.productId} (approved ${row.approvedDate ? row.approvedDate.toISOString() : 'unknown'})`)
-            .join(', ');
-          console.log(`[indentSync] Sent ${group.rows.length} item(s) for entity ${entityCode}: ${sentDetails}`);
-        } else {
-          console.error(`[indentSync] API rejected entity ${entityCode}:`, response.status, JSON.stringify(response.data));
-        }
-      } catch (err) {
-        console.error(`[indentSync] Failed to send entity ${entityCode}:`, err.message);
-      }
-    }
+    readConn = await getJobConnection();
+    rows = await getApprovedIndentsToday(readConn);
   } catch (err) {
-    console.error('[indentSync] Run failed:', err.message);
+    console.error('[indentSync] Run failed (reading pending indents):', err.message);
     throw err;
   } finally {
-    if (connection) await connection.close();
+    if (readConn) await readConn.close();
+  }
+
+  if (!rows || rows.length === 0) {
+    return;
+  }
+
+  console.log(`[indentSync] Found ${rows.length} approved indent item(s) to sync.`);
+
+  const groups = groupByEntity(rows);
+  const apiTimeout = Number(process.env.INDENT_SYNC_API_TIMEOUT_MS || 20000);
+
+  for (const [entityCode, group] of groups) {
+    const payload = {
+      entity_gst: group.entityGst,
+      products: group.rows.map(buildProduct)
+    };
+
+    let response;
+    try {
+      response = await axios.post(apiUrl, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        validateStatus: () => true,
+        timeout: apiTimeout
+      });
+    } catch (err) {
+      console.error(`[indentSync] Failed to send entity ${entityCode}:`, err.message);
+      continue;
+    }
+
+    const success = response.status >= 200 && response.status < 300 && response.data?.status === true;
+    if (!success) {
+      console.error(`[indentSync] API rejected entity ${entityCode}:`, response.status, JSON.stringify(response.data));
+      continue;
+    }
+
+    // 2. Vendor accepted this entity - mark its rows on a fresh short-lived
+    //    connection. A failure here only means the items get re-sent (and
+    //    de-duped by the vendor) on the next run, so don't abort the loop.
+    let markConn;
+    try {
+      markConn = await getJobConnection();
+      await markAsSent(markConn, group.rows);
+      const sentDetails = group.rows
+        .map(row => `${row.indentNumber}/${row.productId} (approved ${row.approvedDate ? row.approvedDate.toISOString() : 'unknown'})`)
+        .join(', ');
+      console.log(`[indentSync] Sent ${group.rows.length} item(s) for entity ${entityCode}: ${sentDetails}`);
+    } catch (err) {
+      console.error(`[indentSync] Sent to vendor but FAILED to mark entity ${entityCode} as sent:`, err.message);
+    } finally {
+      if (markConn) await markConn.close();
+    }
   }
 };
 

@@ -32,7 +32,8 @@ const port = process.env.PORT || 5000;
 
 // Global Middleware
 app.use(cors());
-app.use(express.json());
+// Order payloads can carry many variants/indent products - default 100kb is tight.
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "5mb" }));
 
 // Serve Static Frontend
 app.use(express.static(path.join(__dirname, "public")));
